@@ -16,6 +16,7 @@ struct ServiceInfoFlowView: View {
     @State private var loading: Bool
     @State private var loadError: String?
     @State private var theme = ManagedBleFlowTheme.snapshot()
+    @State private var privacyPolicyUrl: String?
 
     init(
         apiBaseUrl: String,
@@ -37,7 +38,10 @@ struct ServiceInfoFlowView: View {
 
     private var heroHeight: CGFloat { UIScreen.main.bounds.height * 0.42 }
     private var fadeHeight: CGFloat { heroHeight * 0.42 }
-    private var policyURL: URL? { URL(string: AtomicUiCopy.servicePolicyUrl) }
+    private var policyURL: URL? {
+        let raw = privacyPolicyUrl ?? AtomicUiCopy.servicePolicyUrl
+        return URL(string: raw)
+    }
 
     var body: some View {
         Group {
@@ -57,8 +61,17 @@ struct ServiceInfoFlowView: View {
             }
         }
         .task {
+            await loadLegalLinks()
             guard !sessionAlreadyReady else { return }
             await bootstrap()
+        }
+    }
+
+    private func loadLegalLinks() async {
+        if let links = try? await BagIdSdk.shared.legalLinks() {
+            await MainActor.run {
+                privacyPolicyUrl = links.privacyPolicy
+            }
         }
     }
 
@@ -127,13 +140,15 @@ struct ServiceInfoFlowView: View {
         }
         .background(Color.white.ignoresSafeArea())
         .safeAreaInset(edge: .bottom) {
-            AtomicUiBottomButton(title: AtomicUiCopy.serviceContinue, theme: theme) {
-                Task {
-                    do {
-                        let json = try await AtomicUi.shared.acceptServiceInfo()
-                        onResult(json)
-                    } catch {
-                        onResult(serviceInfoFailureJson(error))
+            ManagedBleBottomBar {
+                AtomicUiBottomButton(title: AtomicUiCopy.serviceContinue, theme: theme) {
+                    Task {
+                        do {
+                            let json = try await AtomicUi.shared.acceptServiceInfo()
+                            onResult(json)
+                        } catch {
+                            onResult(serviceInfoFailureJson(error))
+                        }
                     }
                 }
             }

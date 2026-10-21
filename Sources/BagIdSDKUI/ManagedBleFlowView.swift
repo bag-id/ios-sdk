@@ -81,7 +81,8 @@ struct ManagedBleFlowView: View {
     @State private var custodySession: CustodySession?
     @State private var custodyRl = ""
     @State private var custodySr = ""
-    @State private var custodyBleBanner: String?
+    @State private var custodyTagDisconnected = false
+    @State private var custodySubmitPending = false
     @State private var custodyProofSubmitted = false
     @State private var scanPassCount = 0
     @State private var lastTagForCustodyReconnect: DiscoveredEbtBleDevice?
@@ -103,7 +104,8 @@ struct ManagedBleFlowView: View {
             phaseBackground.ignoresSafeArea()
             phaseContent(theme: theme)
             if let session = custodySession {
-                custodyOverlay(session: session, theme: theme)
+                custodyScreen(session: session, theme: theme)
+                    .transition(.opacity)
             }
         }
         .tint(theme.primary)
@@ -125,10 +127,8 @@ struct ManagedBleFlowView: View {
         }
     }
 
-    private static let bagIdDiscoverabilityHint =
-        "Press the left button on your BagID once so we can find it."
-
     private var usesLightChrome: Bool {
+        if custodySession != nil { return true }
         switch phase {
         case .pickDevice, .trackingCta, .trackingConsent: return true
         default: return false
@@ -263,15 +263,6 @@ struct ManagedBleFlowView: View {
                     .foregroundStyle(Color.white.opacity(0.65))
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 220)
-                if isTargetedScan && custodySession == nil {
-                    BagIdDiscoverabilityIllustration()
-                        .frame(height: 120)
-                    Text(Self.bagIdDiscoverabilityHint)
-                        .font(.callout)
-                        .foregroundStyle(Color.white.opacity(0.7))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
-                }
                 if postProofReminder {
                     Text("Turn on Bluetooth on your bag tag and hold it near your phone.")
                         .font(.callout)
@@ -300,83 +291,29 @@ struct ManagedBleFlowView: View {
         custodyProofSubmitted && custodySession == nil
     }
 
-    // MARK: - Custody overlay
+    // MARK: - Custody proof
 
-    @ViewBuilder
-    private func custodyOverlay(session: CustodySession, theme: ManagedBleFlowTheme) -> some View {
-        ZStack {
-            Color.black.opacity(0.52).ignoresSafeArea()
-            VStack {
-                Spacer()
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("Custody proof")
-                        .font(.title3.bold())
-                    if let banner = custodyBleBanner {
-                        Text(banner)
-                            .font(.subheadline)
-                            .foregroundStyle(Color.orange)
-                    }
-                    Text("Attempt \(session.attemptIndex) of \(session.maxAttempts)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(theme.primary)
-                    Text("Enter the PNR (record locator) and passenger surname matching this itinerary.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    if let err = session.lastError {
-                        Text(err).font(.caption).foregroundStyle(theme.error)
-                    }
-                    hintRow("PNR:", session.hints.maskedRecordLocator, theme: theme)
-                    hintRow("Surname:", session.hints.maskedSurname, theme: theme)
-                    let flightInfo = [session.hints.departureAirport,
-                                      session.hints.destinationAirport,
-                                      session.hints.departureAtIso]
-                        .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
-                    if !flightInfo.isEmpty {
-                        Text(flightInfo).font(.caption).foregroundStyle(.secondary)
-                    }
-                    TextField("PNR / record locator", text: $custodyRl)
-                        .textFieldStyle(.roundedBorder)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.characters)
-                    TextField("Passenger surname", text: $custodySr)
-                        .textFieldStyle(.roundedBorder)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.characters)
-                    HStack(spacing: 12) {
-                        Button("Cancel") { custodyCancel(session: session) }
-                            .frame(maxWidth: .infinity)
-                            .buttonStyle(.bordered)
-                        Button("Submit & retry") { custodySubmit(session: session) }
-                            .frame(maxWidth: .infinity)
-                            .buttonStyle(.borderedProminent)
-                            .disabled(
-                                custodyRl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                                custodySr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            )
-                    }
-                }
-                .padding(20)
-                .background(Color(UIColor.systemBackground), in: RoundedRectangle(cornerRadius: 16))
-                .padding(.horizontal, 20)
-                Spacer()
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func hintRow(_ label: String, _ value: String?, theme: ManagedBleFlowTheme) -> some View {
-        if let v = value, !v.isEmpty {
-            HStack(spacing: 4) {
-                Text(label).font(.caption.weight(.semibold)).foregroundStyle(theme.primary)
-                Text(v).font(.caption).foregroundStyle(.secondary)
-            }
-        }
+    private func custodyScreen(session: CustodySession, theme: ManagedBleFlowTheme) -> some View {
+        ManagedBleCustodyProofView(
+            hints: session.hints,
+            attemptIndex: session.attemptIndex,
+            maxAttempts: session.maxAttempts,
+            lastError: session.lastError,
+            tagDisconnected: custodyTagDisconnected,
+            waitingForTag: custodySubmitPending,
+            recordLocator: $custodyRl,
+            surname: $custodySr,
+            theme: theme,
+            onSubmit: { custodySubmit(session: session) },
+            onCancel: { custodyCancel(session: session) }
+        )
     }
 
     // MARK: - Custody actions
 
     private func custodyCancel(session: CustodySession) {
-        custodyBleBanner = nil
+        custodyTagDisconnected = false
+        custodySubmitPending = false
         lastTagForCustodyReconnect = nil
         reconnectTask?.cancel()
         phase = allowsManualPick && !devices.isEmpty ? .pickDevice : .searching
@@ -385,8 +322,17 @@ struct ManagedBleFlowView: View {
     }
 
     private func custodySubmit(session: CustodySession) {
+        // Hold the proof until the tag is back — the SDK needs the BLE link right after the proof is accepted.
+        if custodyTagDisconnected {
+            custodySubmitPending = true
+            return
+        }
+        sendCustodyProof()
+    }
+
+    private func sendCustodyProof() {
+        custodySubmitPending = false
         custodyProofSubmitted = true
-        custodyBleBanner = nil
         BagIdSdk.shared.submitManagedBleCustodyProof(
             recordLocator: custodyRl.trimmingCharacters(in: .whitespacesAndNewlines),
             surname: custodySr.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -412,7 +358,8 @@ struct ManagedBleFlowView: View {
                 } else {
                     custodySession = nil
                     reconnectTask?.cancel()
-                    custodyBleBanner = nil
+                    custodyTagDisconnected = false
+                    custodySubmitPending = false
                 }
             }
         }
@@ -770,10 +717,9 @@ struct ManagedBleFlowView: View {
                 guard !Task.isCancelled else { break }
                 let isConnected = state.connectedDevice?.deviceId.lowercased() == device.deviceId.lowercased()
                 await MainActor.run {
-                    if isConnected {
-                        custodyBleBanner = nil
-                    } else {
-                        custodyBleBanner = "Tag disconnected — turn on Bluetooth and hold tag near phone. Reconnecting…"
+                    custodyTagDisconnected = !isConnected
+                    if isConnected, custodySubmitPending, custodySession != nil {
+                        sendCustodyProof()
                     }
                 }
                 if !isConnected {
@@ -799,7 +745,8 @@ struct ManagedBleFlowView: View {
             BagIdSdk.shared.resetManagedBleCustodyHost()
             custodySession = nil
             lastTagForCustodyReconnect = nil
-            custodyBleBanner = nil
+            custodyTagDisconnected = false
+            custodySubmitPending = false
             onResult(json)
         }
     }

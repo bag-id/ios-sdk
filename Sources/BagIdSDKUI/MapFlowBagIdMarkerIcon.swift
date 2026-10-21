@@ -6,21 +6,23 @@ import UIKit
 enum MapFlowBagIdMarkerIcon {
     static let groundAnchor = CGPoint(x: 0.5, y: 0.92)
 
-    private static var primary: UIImage?
-    private static var secondary: UIImage?
+    /// Rendered pins keyed by (selected, live).
+    private static var cache: [String: UIImage] = [:]
     private static var bagCache: UIImage?
 
-    static func image(isPrimary: Bool) -> UIImage {
-        if isPrimary {
-            if let primary { return primary }
-            let made = render(isPrimary: true)
-            primary = made
-            return made
-        }
-        if let secondary { return secondary }
-        let made = render(isPrimary: false)
-        secondary = made
+    static func image(isPrimary: Bool, live: Bool = false) -> UIImage {
+        let key = "\(isPrimary)-\(live)"
+        if let cached = cache[key] { return cached }
+        let made = render(isPrimary: isPrimary, live: live)
+        cache[key] = made
         return made
+    }
+
+    /// A distinct image per pin. Sharing one `UIImage` across `GMSMarker`s drops the later pins.
+    static func markerImage(isPrimary: Bool, live: Bool = false) -> UIImage {
+        let image = image(isPrimary: isPrimary, live: live)
+        guard let cgImage = image.cgImage else { return image }
+        return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
     }
 
     static func bagUIImage() -> UIImage? {
@@ -34,7 +36,7 @@ enum MapFlowBagIdMarkerIcon {
         return nil
     }
 
-    private static func render(isPrimary: Bool) -> UIImage {
+    private static func render(isPrimary: Bool, live: Bool) -> UIImage {
         let pinWidth: CGFloat = isPrimary ? 56 : 48
         let tipHeight: CGFloat = isPrimary ? 10 : 8
         let shadowPad: CGFloat = 5
@@ -71,6 +73,17 @@ enum MapFlowBagIdMarkerIcon {
 
             let circleRect = CGRect(x: shadowPad, y: shadowPad, width: pinWidth, height: pinWidth)
             drawBag(in: circleRect, maxFraction: 0.58)
+
+            if live {
+                // Live badge: accent dot with a white ring on the pin's top-right edge.
+                let radius = pinWidth / 2
+                let center = CGPoint(x: circleRect.midX + radius * 0.72, y: circleRect.midY - radius * 0.72)
+                let dot: CGFloat = 7
+                UIColor.white.setFill()
+                UIBezierPath(arcCenter: center, radius: dot + 2, startAngle: 0, endAngle: .pi * 2, clockwise: true).fill()
+                UIColor(MapFlowTheme.accent).setFill()
+                UIBezierPath(arcCenter: center, radius: dot, startAngle: 0, endAngle: .pi * 2, clockwise: true).fill()
+            }
         }
     }
 
@@ -153,10 +166,12 @@ enum MapFlowDeviceChrome {
         isHighlighted ? MapFlowTheme.accent : MapFlowTheme.background.opacity(0.12)
     }
 
-    static func nameEmoji(for device: MapDevice) -> String {
-        let name = device.displayName.lowercased()
-        if name.contains("red") { return "🔴" }
-        if name.contains("test") { return "🟤" }
-        return device.isWithYou ? "🔴" : "🧳"
+    static func listStatusDotColor(isWithYou: Bool) -> Color {
+        isWithYou ? Color(red: 232 / 255, green: 93 / 255, blue: 58 / 255) : Color(red: 180 / 255, green: 180 / 255, blue: 185 / 255)
+    }
+
+    static func hasListSerial(_ device: MapDevice) -> Bool {
+        let sn = device.serialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !sn.isEmpty && sn != "—"
     }
 }

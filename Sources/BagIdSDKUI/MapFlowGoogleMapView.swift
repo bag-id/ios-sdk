@@ -8,9 +8,51 @@ private enum MapFlowGms {
     private static var didProvideKey = false
 
     static func provideAPIKeyOnce(_ key: String) {
-        guard !didProvideKey else { return }
+        guard Thread.isMainThread, !didProvideKey else { return }
         GMSServices.provideAPIKey(key)
         didProvideKey = true
+    }
+}
+
+/// Hosts [GMSMapView] so the map is created on the main thread after it is in a window.
+/// SwiftUI can call `makeUIView` from a cooperative task; Google Maps throws if created there.
+final class MapFlowMapHostView: UIView {
+    private(set) var mapView: GMSMapView?
+    var installMap: (() -> GMSMapView)?
+    var onMapReady: ((GMSMapView) -> Void)?
+    private var needsApply = true
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        installIfNeeded()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        mapView?.frame = bounds
+        deliverIfReady()
+    }
+
+    func requestApply() {
+        needsApply = true
+        deliverIfReady()
+    }
+
+    private func installIfNeeded() {
+        guard Thread.isMainThread, window != nil, mapView == nil, let installMap else { return }
+        let created = installMap()
+        created.frame = bounds
+        created.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(created)
+        mapView = created
+        deliverIfReady()
+    }
+
+    private func deliverIfReady() {
+        let minSide = MapFlowMapCamera.clusterPadding * 2
+        guard needsApply, let mapView, bounds.width > minSide, bounds.height > minSide else { return }
+        needsApply = false
+        onMapReady?(mapView)
     }
 }
 
@@ -34,13 +76,26 @@ struct MapFlowGoogleMapView: UIViewRepresentable {
     var selectedDeviceId: String?
     var focusGeneration: Int
     var showSatellite: Bool
+    var bottomInset: CGFloat = 0
     var onSelectDevice: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
 
-    func makeUIView(context: Context) -> GMSMapView {
+    func makeUIView(context: Context) -> MapFlowMapHostView {
+        let host = MapFlowMapHostView()
+        host.installMap = { self.makeMap(context: context) }
+        host.onMapReady = { mapView in self.apply(mapView, context: context) }
+        return host
+    }
+
+    func updateUIView(_ host: MapFlowMapHostView, context: Context) {
+        host.onMapReady = { mapView in self.apply(mapView, context: context) }
+        host.requestApply()
+    }
+
+    private func makeMap(context: Context) -> GMSMapView {
         MapFlowGms.provideAPIKeyOnce(mapsApiKey)
         let mapView =
             GMSMapView.map(
@@ -56,17 +111,39 @@ struct MapFlowGoogleMapView: UIViewRepresentable {
         mapView.settings.myLocationButton = false
         mapView.mapType = showSatellite ? .hybrid : .normal
         mapView.delegate = context.coordinator
-        context.coordinator.onSelectDevice = onSelectDevice
-        context.coordinator.syncMarkers(on: mapView, devices: devices, selectedDeviceId: selectedDeviceId)
-        context.coordinator.showAllDevicesOverview(on: mapView, devices: devices, animated: false)
         return mapView
     }
 
-    func updateUIView(_ mapView: GMSMapView, context: Context) {
-        mapView.mapType = showSatellite ? .hybrid : .normal
+    private func apply(_ mapView: GMSMapView, context: Context) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.apply(mapView, context: context) }
+            return
+        }
+        guard mapView.bounds.width > MapFlowMapCamera.clusterPadding * 2,
+              mapView.bounds.height > MapFlowMapCamera.clusterPadding * 2
+        else { return }
+        let mapType: GMSMapViewType = showSatellite ? .hybrid : .normal
+        if mapView.mapType != mapType { mapView.mapType = mapType }
+        let firstLayout = context.coordinator.lastDeviceSignature.isEmpty
+        let insetChanged = abs(context.coordinator.appliedBottomInset - bottomInset) > 1
+        if insetChanged {
+            // Only when the device sheet snaps — padding moves the camera's centre, so ease it.
+            context.coordinator.appliedBottomInset = bottomInset
+            let padding = UIEdgeInsets(top: 12, left: 12, bottom: bottomInset, right: 12)
+            if firstLayout {
+                mapView.padding = padding
+            } else {
+                UIView.animate(withDuration: 0.3, delay: 0, options: [.curveEaseInOut, .beginFromCurrentState]) {
+                    mapView.padding = padding
+                    mapView.layoutIfNeeded()
+                }
+            }
+        }
         context.coordinator.onSelectDevice = onSelectDevice
         context.coordinator.syncMarkers(on: mapView, devices: devices, selectedDeviceId: selectedDeviceId)
-        if context.coordinator.lastFocusGeneration != focusGeneration {
+        if firstLayout || (insetChanged && !context.coordinator.hasFocused) {
+            context.coordinator.showAllDevicesOverview(on: mapView, devices: devices, animated: !firstLayout)
+        } else if context.coordinator.lastFocusGeneration != focusGeneration {
             context.coordinator.lastFocusGeneration = focusGeneration
             if let id = focusDeviceId, let device = devices.first(where: { $0.id == id }) {
                 context.coordinator.focusOnDevice(
@@ -75,14 +152,13 @@ struct MapFlowGoogleMapView: UIViewRepresentable {
                     allDevices: devices,
                 )
             }
-        } else if context.coordinator.lastDeviceSignature != deviceCoordinateSignature(devices) {
-            context.coordinator.showAllDevicesOverview(on: mapView, devices: devices, animated: true)
         }
         context.coordinator.lastDeviceSignature = deviceCoordinateSignature(devices)
     }
 
     private func deviceCoordinateSignature(_ devices: [MapDevice]) -> String {
         devices
+            .filter(\.locationAvailable)
             .map {
                 let c = MapFlowCoordinates.coordinate(for: $0)
                 return "\($0.id):\(c.latitude):\(c.longitude)"
@@ -93,8 +169,12 @@ struct MapFlowGoogleMapView: UIViewRepresentable {
     final class Coordinator: NSObject, GMSMapViewDelegate {
         var lastFocusGeneration: Int = -1
         var lastDeviceSignature: String = ""
+        var appliedBottomInset: CGFloat = -1
+        var hasFocused = false
         var onSelectDevice: ((String) -> Void)?
         private var markers: [String: GMSMarker] = [:]
+        /// What each marker's icon was drawn for, so it is only re-rendered when that changes.
+        private var markerLooks: [String: String] = [:]
         private var lastFocusedCoordinate: CLLocationCoordinate2D?
         private var focusSequenceToken = 0
 
@@ -106,28 +186,40 @@ struct MapFlowGoogleMapView: UIViewRepresentable {
         }
 
         func syncMarkers(on mapView: GMSMapView, devices: [MapDevice], selectedDeviceId: String?) {
-            let ids = Set(devices.map(\.id))
+            let pinned = devices.filter { $0.locationAvailable }
+            let ids = Set(pinned.map(\.id))
             for (id, marker) in markers where !ids.contains(id) {
                 marker.map = nil
                 markers.removeValue(forKey: id)
+                markerLooks.removeValue(forKey: id)
             }
-            for device in devices {
+            for device in pinned {
                 let coordinate = MapFlowCoordinates.coordinate(for: device)
                 let isSelected = device.id == selectedDeviceId
+                let look = "\(isSelected)-\(device.trackingLive)"
                 if let marker = markers[device.id] {
-                    marker.position = coordinate
-                    marker.title = device.displayName
-                    marker.icon = MapFlowBagIdMarkerIcon.image(isPrimary: isSelected)
-                    marker.groundAnchor = MapFlowBagIdMarkerIcon.groundAnchor
-                    marker.zIndex = isSelected ? 10 : 0
-                    marker.userData = device.id
+                    // Touch only what changed — reassigning icon/position re-renders the pin (flicker).
+                    if marker.position.latitude != coordinate.latitude ||
+                        marker.position.longitude != coordinate.longitude {
+                        marker.position = coordinate
+                    }
+                    if marker.title != device.displayName { marker.title = device.displayName }
+                    let zIndex: Int32 = isSelected ? 2 : 1
+                    if marker.zIndex != zIndex { marker.zIndex = zIndex }
+                    if markerLooks[device.id] != look {
+                        markerLooks[device.id] = look
+                        marker.icon = MapFlowBagIdMarkerIcon.markerImage(isPrimary: isSelected, live: device.trackingLive)
+                    }
+                    if marker.map !== mapView { marker.map = mapView }
                 } else {
+                    let icon = MapFlowBagIdMarkerIcon.markerImage(isPrimary: isSelected, live: device.trackingLive)
+                    markerLooks[device.id] = look
                     let marker = GMSMarker()
                     marker.position = coordinate
                     marker.title = device.displayName
-                    marker.icon = MapFlowBagIdMarkerIcon.image(isPrimary: isSelected)
+                    marker.icon = icon
                     marker.groundAnchor = MapFlowBagIdMarkerIcon.groundAnchor
-                    marker.zIndex = isSelected ? 10 : 0
+                    marker.zIndex = isSelected ? 2 : 1
                     marker.userData = device.id
                     marker.map = mapView
                     markers[device.id] = marker
@@ -141,8 +233,11 @@ struct MapFlowGoogleMapView: UIViewRepresentable {
             device: MapDevice,
             allDevices: [MapDevice],
         ) {
+            guard device.locationAvailable else { return }
+            hasFocused = true
             let target = MapFlowCoordinates.coordinate(for: device)
-            let cluster = MapFlowCoordinates.clusteredDevices(from: allDevices, around: device)
+            let located = allDevices.filter(\.locationAvailable)
+            let cluster = MapFlowCoordinates.clusteredDevices(from: located, around: device)
             let bothInView = areAllVisible(cluster, on: mapView)
             let startZoom = mapView.camera.zoom
             var steps: [(GMSCameraUpdate, TimeInterval)] = []
@@ -200,8 +295,9 @@ struct MapFlowGoogleMapView: UIViewRepresentable {
         }
 
         func showAllDevicesOverview(on mapView: GMSMapView, devices: [MapDevice], animated: Bool) {
-            guard !devices.isEmpty else { return }
-            let cluster = MapFlowCoordinates.clusteredDevices(from: devices, around: devices.first)
+            let pinned = devices.filter { $0.locationAvailable }
+            guard !pinned.isEmpty else { return }
+            let cluster = MapFlowCoordinates.clusteredDevices(from: pinned, around: pinned.first)
             if cluster.count == 1, let only = cluster.first {
                 let coordinate = MapFlowCoordinates.coordinate(for: only)
                 let update = GMSCameraUpdate.setTarget(coordinate, zoom: MapFlowMapCamera.regionalZoom)
@@ -209,7 +305,7 @@ struct MapFlowGoogleMapView: UIViewRepresentable {
                 lastFocusedCoordinate = coordinate
                 return
             }
-            guard let bounds = MapFlowCoordinates.bounds(for: cluster, around: devices.first) else { return }
+            guard let bounds = MapFlowCoordinates.bounds(for: cluster, around: pinned.first) else { return }
             apply(
                 GMSCameraUpdate.fit(bounds, withPadding: MapFlowMapCamera.clusterPadding),
                 on: mapView,

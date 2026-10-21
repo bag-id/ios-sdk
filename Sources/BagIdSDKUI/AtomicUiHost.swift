@@ -45,7 +45,7 @@ extension BagIdIosHost {
     }
 
     /// Full-screen `SERVICE_INFO` (GDPR duty to inform). Requires API URL, source app key, federated token.
-    /// Consent GET/POST are placeholders until a backend contract exists.
+    /// Skip/accept uses `GET`/`POST /v2/clients/agreements/terms-of-use` after session prepare.
     /// If consent is already recorded, returns `SUCCESS` with `data.alreadyRecorded: true` and does not present.
     @MainActor
     public static func presentServiceInfo(

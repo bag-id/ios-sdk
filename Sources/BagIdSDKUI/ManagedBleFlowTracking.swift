@@ -65,8 +65,8 @@ struct ManagedBleTrackingCtaView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.white.ignoresSafeArea())
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 10) {
-                ManagedBleOutlineButton(title: ManagedBleTrackingCopy.notNow, action: onNotNow)
+            ManagedBleBottomBar {
+                ManagedBleOutlineButton(title: ManagedBleTrackingCopy.notNow, theme: theme, action: onNotNow)
                 AtomicUiBottomButton(title: ManagedBleTrackingCopy.start, theme: theme, action: onStart)
             }
         }
@@ -145,8 +145,8 @@ struct ManagedBleTrackingConsentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.white.ignoresSafeArea())
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 10) {
-                ManagedBleOutlineButton(title: ManagedBleTrackingCopy.notNow, action: onDecline)
+            ManagedBleBottomBar {
+                ManagedBleOutlineButton(title: ManagedBleTrackingCopy.notNow, theme: theme, action: onDecline)
                 AtomicUiBottomButton(
                     title: ManagedBleTrackingCopy.enable,
                     disabled: !canEnable,
@@ -278,23 +278,10 @@ struct ManagedBleTrackingFailedView: View {
             .padding(.top, 12)
         }
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 10) {
-                Button(action: onClose) {
-                    Text(ManagedBleTrackingCopy.close)
-                        .font(.system(size: 18, weight: .regular))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 48)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(Color.white.opacity(0.7), lineWidth: 1.5)
-                        )
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 20)
+            ManagedBleBottomBar(background: theme.background, onDark: true) {
+                ManagedBleOutlineButton(title: ManagedBleTrackingCopy.close, onDark: true, theme: theme, action: onClose)
                 AtomicUiBottomButton(title: ManagedBleTrackingCopy.retry, theme: theme, action: onRetry)
             }
-            .padding(.bottom, 12)
         }
     }
 }

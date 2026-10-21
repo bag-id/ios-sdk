@@ -113,24 +113,51 @@ struct ManagedBleFoundDeviceCard: View {
     }
 }
 
+/// Secondary action (Back / Not Now / Cancel / Close). Same height, radius and inset as
+/// [BagIdThemedPrimaryButton]; opaque so scrolled content never shows through it.
 struct ManagedBleOutlineButton: View {
     let title: String
+    var onDark: Bool = false
+    var theme: ManagedBleFlowTheme = .current
     let action: () -> Void
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: theme.borderRadius)
+        let foreground = onDark ? Color.white : MapFlowTheme.onLight
         Button(action: action) {
             Text(title)
-                .font(.system(size: 18, weight: .regular))
-                .foregroundStyle(MapFlowTheme.onLight)
+                .font(theme.themedFont(size: theme.bodySize + 2, weight: .regular, relativeTo: .body))
+                .foregroundStyle(foreground)
                 .frame(maxWidth: .infinity)
-                .frame(height: UIScreen.main.bounds.height * 0.062)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(MapFlowTheme.onLight.opacity(0.35), lineWidth: 1.5)
-                )
+                .frame(height: theme.primaryButtonHeight())
+                .background(onDark ? theme.background : Color.white, in: shape)
+                .overlay(shape.stroke(foreground.opacity(onDark ? 0.7 : 0.35), lineWidth: 1.5))
+                .contentShape(shape)
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 20)
+        .padding(.horizontal, theme.paddingLarge)
+    }
+}
+
+/// Opaque bottom action bar for `safeAreaInset(edge: .bottom)` — content scrolling underneath
+/// stays hidden behind it, with a hairline separating the two.
+struct ManagedBleBottomBar<Content: View>: View {
+    var background: Color = .white
+    var onDark: Bool = false
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(spacing: 10) {
+            content()
+        }
+        .padding(.top, 12)
+        .frame(maxWidth: .infinity)
+        .background(background.ignoresSafeArea(edges: .bottom))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill((onDark ? Color.white : Color.black).opacity(0.08))
+                .frame(height: 1)
+        }
     }
 }
 
@@ -212,21 +239,8 @@ struct ManagedBleFoundDevicesView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.white.ignoresSafeArea())
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 10) {
-                Button(action: onBack) {
-                    Text("Back")
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(.black)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(Color.white, in: RoundedRectangle(cornerRadius: MapFlowTheme.cornerRadius))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: MapFlowTheme.cornerRadius)
-                                .stroke(Color.black, lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 20)
+            ManagedBleBottomBar {
+                ManagedBleOutlineButton(title: "Back", theme: theme, action: onBack)
                 if selectedDeviceId != nil {
                     AtomicUiBottomButton(title: ManagedBleCopy.connect, theme: theme, action: onConnect)
                 } else {
