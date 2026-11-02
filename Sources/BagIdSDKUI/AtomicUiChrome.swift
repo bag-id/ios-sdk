@@ -57,9 +57,31 @@ struct AtomicUiCloseBar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Close")
+            .showAfter15s()
         }
         .padding(.horizontal, 20)
         .padding(.top, 12)
+    }
+}
+
+private struct ShowAfter15s: ViewModifier {
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1 : 0)
+            .allowsHitTesting(shown)
+            .accessibilityHidden(!shown)
+            .task {
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                shown = true
+            }
+    }
+}
+
+extension View {
+    func showAfter15s() -> some View {
+        modifier(ShowAfter15s())
     }
 }
 

@@ -54,6 +54,7 @@ struct ServiceInfoFlowView: View {
                     Text("Unable to open")
                         .font(.headline)
                     Button("Close") { onResult(loadError) }
+                        .showAfter15s()
                 }
                 .padding()
             } else {

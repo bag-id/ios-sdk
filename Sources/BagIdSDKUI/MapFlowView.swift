@@ -50,6 +50,7 @@ struct MapFlowView: View {
                             .foregroundStyle(MapFlowTheme.onLight.opacity(0.75))
                     }
                     Button("Close") { onResult(loadError) }
+                        .showAfter15s()
                 }
                 .padding()
             } else {
@@ -144,6 +145,7 @@ struct MapFlowView: View {
                         .background(MapFlowTheme.onLight.opacity(0.08), in: Circle())
                 }
                 .accessibilityLabel("Close")
+                .showAfter15s()
             }
             Text("Your BagID is now traceable!")
                 .font(.headline.weight(.semibold))

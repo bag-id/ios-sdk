@@ -238,6 +238,7 @@ struct ManagedBleTrackingSetupView: View {
                     .frame(width: 32, height: 32)
             }
             .buttonStyle(.plain)
+            .showAfter15s()
             .padding(.horizontal, 20)
             .padding(.top, 12)
         }
@@ -274,12 +275,14 @@ struct ManagedBleTrackingFailedView: View {
                     .frame(width: 32, height: 32)
             }
             .buttonStyle(.plain)
+            .showAfter15s()
             .padding(.horizontal, 20)
             .padding(.top, 12)
         }
         .safeAreaInset(edge: .bottom) {
             ManagedBleBottomBar(background: theme.background, onDark: true) {
                 ManagedBleOutlineButton(title: ManagedBleTrackingCopy.close, onDark: true, theme: theme, action: onClose)
+                    .showAfter15s()
                 AtomicUiBottomButton(title: ManagedBleTrackingCopy.retry, theme: theme, action: onRetry)
             }
         }

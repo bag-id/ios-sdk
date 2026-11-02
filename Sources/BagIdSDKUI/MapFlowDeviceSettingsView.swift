@@ -157,6 +157,7 @@ struct MapFlowDeviceSettingsView: View {
                         .frame(width: 36, height: 36)
                 }
                 .accessibilityLabel("Close")
+                .showAfter15s()
             }
             .padding(.horizontal, 12)
 
