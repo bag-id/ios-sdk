@@ -16,7 +16,7 @@ public class BagIdIosHost {
     ///   - federatedToken: Federated JWT from the host app's IdP.
     ///   - operation: One of "TRANSFER", "CLEAR", "READ_BATTERY", "READ_FIRMWARE".
     ///   - payloadJson: Optional JSON payload. Schema: `{ schemaVersion, selection?, data }`.
-    ///     For TRANSFER, `data` must contain `baggageId`, `journeyId`, and either `journey` or `displayTicket`.
+    ///     For TRANSFER, `data` must contain `baggageId` and `journeyId` (UUID strings); `journeyData` is optional (the SDK asks BagID's check-in for it).
     ///   - promptTracking: When `true` and `operation` is `TRANSFER`, show post-transfer tracking
     ///     CTA / consent, then a second transfer with sharing on after Enable Tracking.
     ///     Other operations ignore this (default `false`).

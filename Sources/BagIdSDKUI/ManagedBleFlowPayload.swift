@@ -79,8 +79,8 @@ func buildTransferTagRequest(
     deviceId: String,
     uniqueDeviceId: String
 ) throws -> TransferTagRequest {
-    guard let baggageId = data["baggageId"] as? Int,
-          let journeyId = data["journeyId"] as? Int else {
+    guard let baggageId = idString(data["baggageId"]),
+          let journeyId = idString(data["journeyId"]) else {
         throw ManagedFlowPayloadError.missingRequired(
             "TRANSFER payload requires 'baggageId' and 'journeyId' in data."
         )
@@ -102,11 +102,6 @@ func buildTransferTagRequest(
         journey = nil
     }
 
-    guard displayTicket != nil || journey != nil else {
-        throw ManagedFlowPayloadError.missingRequired(
-            "TRANSFER payload requires 'journey' or 'displayTicket' in data."
-        )
-    }
 
     let airlineSharingConsent =
         (data["airlineSharingConsent"] as? Bool)
@@ -116,27 +111,28 @@ func buildTransferTagRequest(
     return TransferTagRequest(
         deviceId: deviceId,
         uniqueDeviceId: uniqueDeviceId.trimmingCharacters(in: .whitespacesAndNewlines),
-        baggageId: Int32(baggageId),
-        journeyId: Int32(journeyId),
+        baggageId: baggageId,
+        journeyId: journeyId,
         recordLocator: recordLocator,
         custodyProofSurname: custodyProofSurname,
         displayTicket: displayTicket,
         journey: journey,
-        airlineSharingConsent: airlineSharingConsent
+        airlineSharingConsent: airlineSharingConsent,
+        journeyData: trimmedNonEmpty(data["journeyData"] as? String)
     )
 }
 
 // MARK: - JSON → SDK model parsers
 
 private func parseJourney(from o: [String: Any]) -> Journey? {
-    guard let journeyId = o["journeyId"] as? Int else { return nil }
+    guard let journeyId = idString(o["journeyId"]) else { return nil }
     let recordLocator = trimmedNonEmpty(o["recordLocator"] as? String)
     let passengers = (o["passengers"] as? [[String: Any]] ?? []).compactMap(parseJourneyPassenger)
     let flights = (o["flights"] as? [[String: Any]] ?? []).compactMap(parseFlight)
     let baggage = (o["baggage"] as? [[String: Any]] ?? []).compactMap(parseBaggageRecord)
     let slots = (o["baggageSlots"] as? [[String: Any]] ?? []).compactMap(parseBaggageSlot)
     return Journey(
-        journeyId: Int32(journeyId),
+        journeyId: journeyId,
         recordLocator: recordLocator,
         passengers: passengers,
         flights: flights,
@@ -149,9 +145,8 @@ private func parseJourney(from o: [String: Any]) -> Journey? {
 }
 
 private func parseJourneyPassenger(from o: [String: Any]) -> Passenger {
-    let passengerId: KotlinInt? = (o["passengerId"] as? Int).map { KotlinInt(int: Int32($0)) }
     return Passenger(
-        passengerId: passengerId,
+        passengerId: idString(o["passengerId"]),
         surname: trimmedNonEmpty(o["surname"] as? String),
         givenName: trimmedNonEmpty(o["givenName"] as? String),
         title: trimmedNonEmpty(o["title"] as? String)
@@ -171,9 +166,9 @@ private func parseFlight(from o: [String: Any]) -> FlightInfo? {
 }
 
 private func parseBaggageRecord(from o: [String: Any]) -> BaggageRecord? {
-    guard let baggageId = o["baggageId"] as? Int else { return nil }
+    guard let baggageId = idString(o["baggageId"]) else { return nil }
     return BaggageRecord(
-        baggageId: Int32(baggageId),
+        baggageId: baggageId,
         baggageTagNumber: trimmedNonEmpty(o["baggageTagNumber"] as? String),
         airline: trimmedNonEmpty(o["airline"] as? String),
         destinationAirport: trimmedNonEmpty(o["destinationAirport"] as? String),
@@ -190,10 +185,10 @@ private func parseBaggageSlot(from o: [String: Any]) -> BaggageSlot? {
 
 private func parseEbtTicket(from o: [String: Any]) -> EbtTicket? {
     guard let baggageObj = o["baggage"] as? [String: Any],
-          let baggageId = baggageObj["baggageId"] as? Int else { return nil }
+          let baggageId = idString(baggageObj["baggageId"]) else { return nil }
 
     let baggage = Baggage(
-        baggageId: Int32(baggageId),
+        baggageId: baggageId,
         priority: baggageObj["priority"] as? Bool ?? false,
         greenstrip: baggageObj["greenstrip"] as? Bool ?? false,
         licenseplate: trimmedNonEmpty(baggageObj["licenseplate"] as? String),
@@ -211,7 +206,6 @@ private func parseEbtTicket(from o: [String: Any]) -> EbtTicket? {
         passenger = nil
     }
 
-    let ticketBaggageId: KotlinInt? = (o["baggageId"] as? Int).map { KotlinInt(int: Int32($0)) }
 
     return EbtTicket(
         recordLocator: trimmedNonEmpty(o["recordLocator"] as? String),
@@ -232,8 +226,15 @@ private func parseEbtTicket(from o: [String: Any]) -> EbtTicket? {
         departureAirport: trimmedNonEmpty(o["departureAirport"] as? String),
         passenger: passenger,
         baggage: baggage,
-        baggageId: ticketBaggageId
+        baggageId: idString(o["baggageId"])
     )
+}
+
+/// An id from the payload: a UUID string in BagID API v2; a number is read as its text.
+private func idString(_ value: Any?) -> String? {
+    if let s = value as? String { return trimmedNonEmpty(s) }
+    if let n = value as? Int { return String(n) }
+    return nil
 }
 
 private func trimmedNonEmpty(_ s: String?) -> String? {

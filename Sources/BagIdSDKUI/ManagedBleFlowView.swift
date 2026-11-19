@@ -75,6 +75,8 @@ struct ManagedBleFlowView: View {
 
     @State private var phase: ManagedBlePhase = .searching
     @State private var statusLine: String
+    /** Developer detail for the last failure; shown only when SDK debug logging is on. */
+    @State private var statusDetail: String? = nil
     @State private var devices: [DiscoveredEbtBleDevice] = []
     @State private var selectedDeviceId: String?
     @State private var pendingResultJson: String?
@@ -175,7 +177,13 @@ struct ManagedBleFlowView: View {
                 selectedDeviceId: selectedDeviceId,
                 isOther: isOtherTag,
                 errorText: statusLine,
-                onSelect: { selectedDeviceId = $0.deviceId },
+                errorDetail: statusDetail,
+                onSelect: {
+                    selectedDeviceId = $0.deviceId
+                    statusLine = ""
+                    statusDetail = nil
+                    statusDetail = nil
+                },
                 onConnect: connectSelectedDevice,
                 onSearchAgain: { Task { await startScanPhase() } },
                 onBack: cancelFlow,
@@ -378,8 +386,11 @@ struct ManagedBleFlowView: View {
     }
 
     private func advanceFromSuccess() {
-        if shouldPromptTracking {
+        if shouldPromptTracking && BagIdSdk.shared.connectedTagOffersTracking {
             phase = .trackingCta
+        } else if shouldPromptTracking {
+            // BagID BLE 2.0 tags are never prompted for location sharing.
+            finishTransferWithoutTracking()
         } else {
             deliver(json: pendingResultJson ?? encode(["status": "SUCCESS", "operation": operation]))
         }
@@ -476,6 +487,7 @@ struct ManagedBleFlowView: View {
             devices = []
             selectedDeviceId = nil
             statusLine = ""
+            statusDetail = nil
         }
 
         stopScan()
@@ -555,6 +567,7 @@ struct ManagedBleFlowView: View {
             devices = []
             selectedDeviceId = nil
             statusLine = ""
+            statusDetail = nil
         }
         stopScan()
         scanTask = Task {
@@ -681,7 +694,8 @@ struct ManagedBleFlowView: View {
         } catch {
             await MainActor.run {
                 if allowsManualPick {
-                    statusLine = error.localizedDescription
+                    statusLine = BagIdUserMessages.shared.forCode(code: "OPERATION_FAILED")
+                    statusDetail = BagIdUserMessages.shared.showsDiagnostics ? error.localizedDescription : nil
                     phase = .pickDevice
                 } else {
                     deliver(json: failure(code: "OPERATION_FAILED", message: error.localizedDescription))
@@ -702,7 +716,8 @@ struct ManagedBleFlowView: View {
             return
         }
         if allowsManualPick, managedFlowStatus(json) != "CANCELLED" {
-            statusLine = managedFlowMessage(json) ?? "Operation failed."
+            statusLine = managedFlowMessage(json) ?? BagIdUserMessages.shared.GENERIC
+            statusDetail = BagIdUserMessages.shared.showsDiagnostics ? (jsonObject(json)?["detail"] as? String) : nil
             phase = .pickDevice
             return
         }
@@ -751,8 +766,14 @@ struct ManagedBleFlowView: View {
         }
     }
 
+    /** Failure envelope: passenger copy in `message`, the developer text in `detail` (same as the Kotlin runner). */
     private func failure(code: String, message: String) -> String {
-        encode(["status": "FAILURE", "code": code, "message": message])
+        encode([
+            "status": "FAILURE",
+            "code": code,
+            "message": BagIdUserMessages.shared.forCode(code: code),
+            "detail": message,
+        ])
     }
 
     private func withTracking(_ json: String, enabled: Bool) -> String {

@@ -533,7 +533,7 @@ struct MapFlowConsentPrivacyView: View {
     }
 
     private func open(_ url: String?) {
-        guard let https = DeviceSettingsStateKt.httpsUrlOrNull(value: url),
+        guard let https = SettingsViewsKt.httpsUrlOrNull(value: url),
               let link = URL(string: https) else { return }
         UIApplication.shared.open(link)
     }

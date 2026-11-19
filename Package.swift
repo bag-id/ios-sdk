@@ -25,8 +25,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "BagIdSDK",
-            url: "https://bagidpublic.blob.core.windows.net/ios-sdk/BagIdSDK-v2.1.0.xcframework.zip",
-            checksum: "76b82c6a69b51b89fd5fd09000b82fcd8dbf0cdfd9feed9afe8cb04320082e74"
+            url: "https://bagidpublic.blob.core.windows.net/ios-sdk/BagIdSDK-v3.0.1.xcframework.zip",
+            checksum: "3380e5cd0625c6ae6b2ec9b4b9d653dadcdc01b952618b06ff8bd6b0563b615d"
         ),
         .target(
             name: "BagIdSDKUI",

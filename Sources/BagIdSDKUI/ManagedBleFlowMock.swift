@@ -13,8 +13,8 @@ enum ManagedBleSimulatorMock {
     static func devices(tagType: AtomicTagType?) -> [DiscoveredEbtBleDevice] {
         let other = tagType == .other
         let identity: EbtTagIdentity = other
-            ? EbtTagIdentity.OtherVendor(modelHint: "BagTag Flex")
-            : EbtTagIdentity.BagId(model: .bagid2Fm)
+            ? EbtTagIdentity(vendorId: "bagtag", model: "BAGTAG_FLEX", displayName: "BagTag Flex", protocolVersion: nil)
+            : EbtTagIdentity(vendorId: "bagid", model: "BAGID_2FM", displayName: "BAGID_2FM", protocolVersion: "gatt20")
         let name = other ? "BagTag Flex" : "BagID 2"
         return [
             DiscoveredEbtBleDevice(

@@ -189,6 +189,8 @@ struct ManagedBleFoundDevicesView: View {
     let selectedDeviceId: String?
     let isOther: Bool
     let errorText: String?
+    /** Developer detail under the message; the flow passes it only when SDK debug logging is on. */
+    var errorDetail: String? = nil
     let onSelect: (DiscoveredEbtBleDevice) -> Void
     let onConnect: () -> Void
     let onSearchAgain: () -> Void
@@ -214,10 +216,7 @@ struct ManagedBleFoundDevicesView: View {
             ScrollView {
                 VStack(spacing: 12) {
                     if let errorText, !errorText.isEmpty {
-                        Text(errorText)
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        ManagedBleNoticeBanner(message: errorText, detail: errorDetail)
                     }
                     ForEach(devices.sorted { $0.signalStrength > $1.signalStrength }, id: \.deviceId) { device in
                         Button { onSelect(device) } label: {
@@ -248,5 +247,42 @@ struct ManagedBleFoundDevicesView: View {
                 }
             }
         }
+    }
+}
+
+
+/** Calm notice for a failed attempt: passenger copy, plus developer detail only in debug builds. */
+struct ManagedBleNoticeBanner: View {
+    let message: String
+    var detail: String? = nil
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.circle")
+                .font(.body)
+                .foregroundStyle(Color(red: 0.72, green: 0.42, blue: 0.0))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(MapFlowTheme.onLight)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(MapFlowTheme.onLight.opacity(0.55))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(red: 1.0, green: 0.96, blue: 0.88))
+        )
+        .accessibilityElement(children: .combine)
     }
 }
